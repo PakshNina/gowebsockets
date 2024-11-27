@@ -21,6 +21,11 @@ type WSServer interface {
 	Stop() error
 }
 
+type historian interface {
+	SaveMessage(msg interface{})
+	GetAllMessages() []interface{}
+}
+
 type wsSrv struct {
 	mux       *http.ServeMux
 	srv       *http.Server
@@ -28,9 +33,10 @@ type wsSrv struct {
 	wsClients map[*websocket.Conn]struct{}
 	mutex     *sync.RWMutex
 	broadcast chan *wsMessage
+	historian historian
 }
 
-func NewWsServer(addr string) WSServer {
+func NewWsServer(addr string, h historian) WSServer {
 	m := http.NewServeMux()
 	return &wsSrv{
 		mux: m,
@@ -42,6 +48,7 @@ func NewWsServer(addr string) WSServer {
 		wsClients: map[*websocket.Conn]struct{}{},
 		mutex:     &sync.RWMutex{},
 		broadcast: make(chan *wsMessage),
+		historian: h,
 	}
 }
 
@@ -79,6 +86,7 @@ func (ws *wsSrv) wsHandler(w http.ResponseWriter, r *http.Request) {
 	ws.mutex.Lock()
 	ws.wsClients[conn] = struct{}{}
 	ws.mutex.Unlock()
+	ws.sendHistory(conn)
 	go ws.readFromClient(conn)
 }
 
@@ -89,6 +97,8 @@ func (ws *wsSrv) readFromClient(conn *websocket.Conn) {
 			wsErr, ok := err.(*websocket.CloseError)
 			if !ok || wsErr.Code != websocket.CloseGoingAway {
 				log.Errorf("Error with reading from WebSocket: %v", err)
+			} else {
+				log.Infof("Client %s disconnected", conn.RemoteAddr().String())
 			}
 			break
 		}
@@ -98,6 +108,7 @@ func (ws *wsSrv) readFromClient(conn *websocket.Conn) {
 		}
 		msg.IPAddress = host
 		msg.Time = time.Now().Format("15:04")
+		go ws.historian.SaveMessage(msg)
 		ws.broadcast <- msg
 	}
 	ws.mutex.Lock()
@@ -116,5 +127,13 @@ func (ws *wsSrv) writeToClientsBroadcast() {
 			}()
 		}
 		ws.mutex.RUnlock()
+	}
+}
+
+func (ws *wsSrv) sendHistory(conn *websocket.Conn) {
+	for _, msg := range ws.historian.GetAllMessages() {
+		if err := conn.WriteJSON(msg); err != nil {
+			log.Errorf("Error with sending history: %v", err)
+		}
 	}
 }
