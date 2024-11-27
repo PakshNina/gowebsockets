@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebSocket Chat</title>
+    <!-- Bootstrap CSS -->
+    <link href="/static/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        #chat {
+            border: 1px solid #ccc;
+            padding: 10px;
+            width: 100%;
+            height: 300px;
+            margin-bottom: 10px;
+            overflow-y: scroll;
+            background-color: #f8f9fa;
+            border-radius: 5px;
+        }
+        .message {
+            margin-bottom: 8px;
+            padding: 5px;
+            border-bottom: 1px solid #ddd;
+            word-wrap: break-word;
+        }
+        .message .address {
+            font-weight: bold;
+        }
+        .message .time {
+            float: right;
+            font-size: 0.75em;
+            color: #888;
+        }
+        .message .text {
+            clear: both;
+            font-size: 0.9em;
+        }
+        .my-message .address {
+            color: #0d6efd;
+        }
+    </style>
+</head>
+<body class="container-sm py-4">
+<h2 class="text-center mb-3">WebSocket Chat</h2>
+<div id="chat"></div>
+<div class="input-group">
+    <input type="text" id="messageInput" class="form-control" placeholder="Type a message">
+    <button id="sendButton" class="btn btn-primary">Send</button>
+</div>
+
+<script>
+    const socket = new WebSocket('ws://' + window.location.host + '/ws');
+    const chat = document.getElementById('chat');
+    const messageInput = document.getElementById('messageInput');
+    const sendButton = document.getElementById('sendButton');
+
+    // Добавление сообщения в чат
+    function addMessage(time, address, message, isMyMessage) {
+        const messageElement = document.createElement('div');
+        messageElement.classList.add('message', 'p-2', 'bg-light', 'rounded');
+
+        const addressElement = document.createElement('div');
+        addressElement.classList.add('address');
+        addressElement.textContent = address;
+
+        const timeElement = document.createElement('div');
+        timeElement.classList.add('time');
+        timeElement.textContent = time;
+
+        const textElement = document.createElement('div');
+        textElement.classList.add('text');
+        textElement.textContent = message;
+
+        messageElement.appendChild(addressElement);
+        messageElement.appendChild(timeElement);
+        messageElement.appendChild(textElement);
+
+        chat.appendChild(messageElement);
+        chat.scrollTop = chat.scrollHeight;
+    }
+
+    // Обработчик для получения сообщений от сервера
+    socket.addEventListener('message', function(event) {
+        const msg = JSON.parse(event.data);
+        addMessage(msg.time, msg.address, msg.message, msg.mymessage);
+    });
+
+    // Обработчик для кнопки отправки сообщения
+    sendButton.addEventListener('click', function() {
+        const message = messageInput.value;
+        if (message) {
+            socket.send(JSON.stringify({ message: message }));
+            messageInput.value = '';
+        }
+    });
+
+    // Обработчик для отправки сообщения по нажатию клавиши Enter
+    messageInput.addEventListener('keypress', function(event) {
+        if (event.key === 'Enter') {
+            sendButton.click();
+        }
+    });
+</script>
+<!-- Bootstrap JS -->
+<script src="/static/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
