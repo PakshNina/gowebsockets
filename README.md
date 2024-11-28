@@ -1,5 +1,5 @@
 # gowebsockets
-WebSockets on Golang
+WebSocket on Golang
 
 [RFC 6455](https://datatracker.ietf.org/doc/html/rfc6455)
 
