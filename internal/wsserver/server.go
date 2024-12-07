@@ -25,9 +25,13 @@ type wsSrv struct {
 	mux       *http.ServeMux
 	srv       *http.Server
 	wsUpg     *websocket.Upgrader
-	wsClients map[*websocket.Conn]struct{}
-	mutex     *sync.RWMutex
 	broadcast chan *wsMessage
+	clients   clients
+}
+
+type clients struct {
+	mutex     *sync.RWMutex
+	wsClients map[*websocket.Conn]struct{}
 }
 
 func NewWsServer(addr string) WSServer {
@@ -38,9 +42,11 @@ func NewWsServer(addr string) WSServer {
 			Addr:    addr,
 			Handler: m,
 		},
-		wsUpg:     &websocket.Upgrader{},
-		wsClients: map[*websocket.Conn]struct{}{},
-		mutex:     &sync.RWMutex{},
+		wsUpg: &websocket.Upgrader{},
+		clients: clients{
+			mutex:     &sync.RWMutex{},
+			wsClients: map[*websocket.Conn]struct{}{},
+		},
 		broadcast: make(chan *wsMessage),
 	}
 }
@@ -54,17 +60,17 @@ func (ws *wsSrv) Start() error {
 }
 
 func (ws *wsSrv) Stop() error {
-	log.Info("Before", ws.wsClients)
+	log.Info("Before", ws.clients.wsClients)
 	close(ws.broadcast)
-	ws.mutex.Lock()
-	for conn := range ws.wsClients {
+	ws.clients.mutex.Lock()
+	for conn := range ws.clients.wsClients {
 		if err := conn.Close(); err != nil {
 			log.Errorf("Error with closing: %v", err)
 		}
-		delete(ws.wsClients, conn)
+		delete(ws.clients.wsClients, conn)
 	}
-	ws.mutex.Unlock()
-	log.Info("After close", ws.wsClients)
+	ws.clients.mutex.Unlock()
+	log.Info("After close", ws.clients.wsClients)
 	return ws.srv.Shutdown(context.Background())
 }
 
@@ -76,9 +82,9 @@ func (ws *wsSrv) wsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	log.Infof("Client with address %s connected", conn.RemoteAddr().String())
-	ws.mutex.Lock()
-	ws.wsClients[conn] = struct{}{}
-	ws.mutex.Unlock()
+	ws.clients.mutex.Lock()
+	ws.clients.wsClients[conn] = struct{}{}
+	ws.clients.mutex.Unlock()
 	go ws.readFromClient(conn)
 }
 
@@ -100,21 +106,21 @@ func (ws *wsSrv) readFromClient(conn *websocket.Conn) {
 		msg.Time = time.Now().Format("15:04")
 		ws.broadcast <- msg
 	}
-	ws.mutex.Lock()
-	delete(ws.wsClients, conn)
-	ws.mutex.Unlock()
+	ws.clients.mutex.Lock()
+	delete(ws.clients.wsClients, conn)
+	ws.clients.mutex.Unlock()
 }
 
 func (ws *wsSrv) writeToClientsBroadcast() {
 	for msg := range ws.broadcast {
-		ws.mutex.RLock()
-		for client := range ws.wsClients {
+		ws.clients.mutex.RLock()
+		for client := range ws.clients.wsClients {
 			func() {
 				if err := client.WriteJSON(msg); err != nil {
 					log.Errorf("Error with writing message: %v", err)
 				}
 			}()
 		}
-		ws.mutex.RUnlock()
+		ws.clients.mutex.RUnlock()
 	}
 }
