@@ -27,6 +27,12 @@ type wsSrv struct {
 	wsUpg     *websocket.Upgrader
 	broadcast chan *wsMessage
 	clients   clients
+	historian historian
+}
+
+type historian interface {
+	AddMessage(msg interface{})
+	GetAllMessages() []interface{}
 }
 
 type clients struct {
@@ -34,7 +40,7 @@ type clients struct {
 	wsClients map[*websocket.Conn]struct{}
 }
 
-func NewWsServer(addr string) WSServer {
+func NewWsServer(addr string, h historian) WSServer {
 	m := http.NewServeMux()
 	return &wsSrv{
 		mux: m,
@@ -48,6 +54,7 @@ func NewWsServer(addr string) WSServer {
 			wsClients: map[*websocket.Conn]struct{}{},
 		},
 		broadcast: make(chan *wsMessage),
+		historian: h,
 	}
 }
 
@@ -85,6 +92,7 @@ func (ws *wsSrv) wsHandler(w http.ResponseWriter, r *http.Request) {
 	ws.clients.mutex.Lock()
 	ws.clients.wsClients[conn] = struct{}{}
 	ws.clients.mutex.Unlock()
+	ws.sendChatHistory(conn)
 	go ws.readFromClient(conn)
 }
 
@@ -104,6 +112,7 @@ func (ws *wsSrv) readFromClient(conn *websocket.Conn) {
 		}
 		msg.IPAddress = host
 		msg.Time = time.Now().Format("15:04")
+		go ws.historian.AddMessage(msg)
 		ws.broadcast <- msg
 	}
 	ws.clients.mutex.Lock()
@@ -115,12 +124,20 @@ func (ws *wsSrv) writeToClientsBroadcast() {
 	for msg := range ws.broadcast {
 		ws.clients.mutex.RLock()
 		for client := range ws.clients.wsClients {
-			func() {
-				if err := client.WriteJSON(msg); err != nil {
+			go func(c *websocket.Conn) {
+				if err := c.WriteJSON(msg); err != nil {
 					log.Errorf("Error with writing message: %v", err)
 				}
-			}()
+			}(client)
 		}
 		ws.clients.mutex.RUnlock()
+	}
+}
+
+func (ws *wsSrv) sendChatHistory(conn *websocket.Conn) {
+	for _, msg := range ws.historian.GetAllMessages() {
+		if err := conn.WriteJSON(msg); err != nil {
+			log.Errorf("Error with writing message: %v", err)
+		}
 	}
 }
